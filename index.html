@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quimi Quest – Moléculas y enlace químico</title>
+<style>
+:root{
+  --bg:#eef6f4; --card:#ffffff; --text:#14262b; --muted:#5d7479; --border:#d3e3e0;
+  --primary:#0f8f7e; --primary-text:#ffffff; --ok:#1f9d55; --ok-bg:#e3f6ea;
+  --bad:#d6403a; --bad-bg:#fde8e7; --warn-bg:#fff6dc;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0f1a1c; --card:#172528; --text:#e9f3f2; --muted:#93aaae; --border:#27393d;
+    --primary:#3fd0bb; --primary-text:#062421; --ok:#4cd68a; --ok-bg:#12301f;
+    --bad:#ff7a73; --bad-bg:#3a1a19; --warn-bg:#352d12;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;justify-content:center;padding:20px 14px}
+#app{width:100%;max-width:620px}
+h1{font-size:1.7rem;margin:6px 0 4px}
+h2{font-size:1.25rem;margin:6px 0 14px;line-height:1.5}
+.sub{color:var(--muted);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:14px}
+.hud{display:flex;flex-wrap:wrap;gap:8px 16px;justify-content:space-between;color:var(--muted);font-size:.92rem;margin-bottom:12px}
+.hud b{color:var(--text)}
+.tag{display:inline-block;font-size:.74rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--primary);margin:0}
+button{font:inherit;cursor:pointer;border-radius:12px;border:1px solid var(--border);background:var(--card);color:var(--text);padding:12px 16px;text-align:left;width:100%;margin-bottom:10px;transition:transform .05s}
+button:active{transform:scale(.98)}
+button.primary{background:var(--primary);color:var(--primary-text);border-color:var(--primary);text-align:center;font-weight:600}
+button:disabled{cursor:default;opacity:1}
+button.correct{background:var(--ok-bg);border-color:var(--ok)}
+button.wrong{background:var(--bad-bg);border-color:var(--bad)}
+button.mode b{display:block;font-size:1.05rem;margin-bottom:2px}
+button.mode span{color:var(--muted);font-size:.9rem}
+input[type=text]{font:inherit;width:100%;padding:12px 14px;border-radius:12px;border:2px solid var(--border);background:var(--bg);color:var(--text);margin-bottom:10px}
+input[type=text]:focus{outline:none;border-color:var(--primary)}
+.fb{border-radius:12px;padding:14px 16px;margin-bottom:12px}
+.fb.ok{background:var(--ok-bg)} .fb.bad{background:var(--bad-bg)}
+.fb p{margin:4px 0}
+.tip{background:var(--warn-bg);border-radius:10px;padding:8px 12px;margin-top:8px;font-size:.93rem}
+.hearts{letter-spacing:2px}
+.big{font-size:2.6rem;font-weight:700;margin:4px 0}
+ul.review{padding-left:18px;margin:8px 0}
+ul.review li{margin-bottom:10px}
+.muted{color:var(--muted)}
+.formula{font-weight:700;font-size:1.15em;white-space:nowrap}
+sub{font-size:.7em}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* ===================== UTILIDADES ===================== */
+const LIVES = 3, TOTAL_Q = 15;
+const app = document.getElementById("app");
+let G = null;
+
+function shuffle(a){ for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; }
+const rnd = a => a[Math.floor(Math.random()*a.length)];
+const sample = (a,n) => shuffle(a.slice()).slice(0,n);
+function getRecord(){ try{ return parseInt(localStorage.getItem("fq_record")||"0",10); }catch(e){ return 0; } }
+function setRecord(v){ try{ localStorage.setItem("fq_record",String(v)); }catch(e){} }
+const rep = (fn,n) => Array.from({length:n},()=>fn);
+const Q = (tag,q,correct,wrongs,tip="") => ({tag,q,opts:[correct,...wrongs],tip});
+const VF = (statement,truth,tip="") => ({tag:"Verdadero o falso",q:statement,opts:["Verdadero","Falso"],correct:truth?"Verdadero":"Falso",fixed:true,tip});
+const fmtNum = x => String(x).replace(".",",");
+
+/* ===================== DATOS QUÍMICOS ===================== */
+const NOMBRE = {H:"hidrógeno",C:"carbono",N:"nitrógeno",O:"oxígeno",Na:"sodio",K:"potasio",Mg:"magnesio",Ca:"calcio",S:"azufre",Cl:"cloro",Br:"bromo"};
+const METALES = ["Na","K","Mg","Ca","Fe","Al","Cu"];
+const NOMETALES = ["H","C","N","O","S","Cl","Br"];
+const NOM_EXTRA = {Fe:"hierro",Al:"aluminio",Cu:"cobre"};
+const nombreEl = s => NOMBRE[s] || NOM_EXTRA[s];
+const MASA = {H:1,C:12,N:14,O:16,Na:23,S:32,Cl:35.5,Ca:40};
+const esMetal = s => METALES.includes(s);
+
+// c = composición [símbolo, nº de átomos]; bond = tipo de enlace; simple = sustancia simple
+const SUBST = [
+  {n:"oxígeno",c:[["O",2]],simple:true,bond:"covalente"},
+  {n:"hidrógeno",c:[["H",2]],simple:true,bond:"covalente"},
+  {n:"nitrógeno",c:[["N",2]],simple:true,bond:"covalente"},
+  {n:"cloro",c:[["Cl",2]],simple:true,bond:"covalente"},
+  {n:"ozono",c:[["O",3]],simple:true,bond:"covalente"},
+  {n:"agua",c:[["H",2],["O",1]],bond:"covalente"},
+  {n:"dióxido de carbono",c:[["C",1],["O",2]],bond:"covalente"},
+  {n:"metano",c:[["C",1],["H",4]],bond:"covalente"},
+  {n:"amoníaco",c:[["N",1],["H",3]],bond:"covalente"},
+  {n:"butano",c:[["C",4],["H",10]],bond:"covalente"},
+  {n:"etano",c:[["C",2],["H",6]],bond:"covalente"},
+  {n:"cloruro de hidrógeno",c:[["H",1],["Cl",1]],bond:"covalente"},
+  {n:"dióxido de azufre",c:[["S",1],["O",2]],bond:"covalente"},
+  {n:"sulfuro de hidrógeno",c:[["H",2],["S",1]],bond:"covalente"},
+  {n:"agua oxigenada",c:[["H",2],["O",2]],bond:"covalente"},
+  {n:"ácido sulfúrico",c:[["H",2],["S",1],["O",4]],bond:"covalente"},
+  {n:"glucosa",c:[["C",6],["H",12],["O",6]],bond:"covalente"},
+  {n:"sacarosa (azúcar común)",c:[["C",12],["H",22],["O",11]],bond:"covalente"},
+  {n:"cloruro de sodio (sal común)",c:[["Na",1],["Cl",1]],bond:"iónico"},
+  {n:"óxido de magnesio",c:[["Mg",1],["O",1]],bond:"iónico"},
+  {n:"bromuro de potasio",c:[["K",1],["Br",1]],bond:"iónico"},
+  {n:"cloruro de potasio",c:[["K",1],["Cl",1]],bond:"iónico"},
+  {n:"cloruro de calcio",c:[["Ca",1],["Cl",2]],bond:"iónico"},
+  {n:"óxido de calcio",c:[["Ca",1],["O",1]],bond:"iónico"}
+];
+SUBST.forEach(s=>{ s.simple = !!s.simple; s.mass = s.c.every(([e])=>MASA[e]!==undefined); });
+const SIMPLES = SUBST.filter(s=>s.simple), COMPUESTOS = SUBST.filter(s=>!s.simple);
+const IONICOS = SUBST.filter(s=>s.bond==="iónico"), COVALENTES = SUBST.filter(s=>s.bond==="covalente");
+
+const fhtml = c => c.map(([s,n])=>s+(n>1?`<sub>${n}</sub>`:"")).join("");
+const F = s => `<span class="formula">${fhtml(s.c)}</span>`;
+const masaDe = c => c.reduce((t,[e,n])=>t+MASA[e]*n,0);
+const total = c => c.reduce((t,[,n])=>t+n,0);
+
+function describe(c){
+  return c.map(([e,n],i)=>{
+    const noun = i===0 ? ` átomo${n>1?"s":""}` : "";
+    return i===0 ? `${n}${noun} de ${nombreEl(e)}` : `${n} de ${nombreEl(e)}`;
+  }).reduce((acc,p,i,arr)=> i===0?p : (i===arr.length-1? acc+" y "+p : acc+", "+p), "");
+}
+function variantes(c){
+  const out = new Map();
+  const add = cc => { if(cc.every(([,n])=>n>=1)){ const h=fhtml(cc); out.set(h,h); } };
+  c.forEach((_,i)=>{
+    [1,-1,2].forEach(d=>{ const cc=c.map(x=>x.slice()); cc[i][1]+=d; add(cc); });
+  });
+  if(c.length===2 && c[0][1]!==c[1][1]) add([[c[0][0],c[1][1]],[c[1][0],c[0][1]]]);
+  out.delete(fhtml(c));
+  return [...out.values()];
+}
+function tipoEl(e){ return esMetal(e) ? "metal" : "no metal"; }
+
+/* ===================== GENERADORES ===================== */
+function genClasifica(){
+  const k = Math.floor(Math.random()*3);
+  if(k===0){
+    const s = rnd(SUBST), tipos = new Set(s.c.map(([e])=>e)).size;
+    return {tag:"Simple o compuesto",q:`La sustancia <b>${s.n}</b>, de fórmula ${F(s)}, ¿es una sustancia simple o un compuesto?`,
+      opts:[s.simple?"Sustancia simple":"Compuesto", s.simple?"Compuesto":"Sustancia simple"],
+      tip:`${fhtml(s.c)} tiene ${tipos} tipo${tipos>1?"s":""} de átomos (${s.c.map(([e])=>e).join(", ")}) → ${s.simple?"sustancia simple":"compuesto"}.`};
+  }
+  if(k===1){
+    const s = rnd(SIMPLES), w = sample(COMPUESTOS,3);
+    return {tag:"Simple o compuesto",q:"¿Cuál de estas sustancias es una <b>sustancia simple</b>?",opts:[F(s),...w.map(F)],
+      tip:`${fhtml(s.c)} solo tiene átomos de un tipo, aunque tenga ${total(s.c)} átomos.`};
+  }
+  const s = rnd(COMPUESTOS), w = sample(SIMPLES,3);
+  return {tag:"Simple o compuesto",q:"¿Cuál de estas sustancias es un <b>compuesto</b>?",opts:[F(s),...w.map(F)],
+    tip:`${fhtml(s.c)} tiene átomos de ${new Set(s.c.map(([e])=>e)).size} tipos distintos.`};
+}
+
+function genCuenta(){
+  const s = rnd(SUBST.filter(x=>x.c.length>1 || x.c[0][1]>1));
+  if(Math.random()<0.5){
+    const [e,n] = rnd(s.c);
+    return {tag:"Fórmulas",typed:true,num:n,q:`¿Cuántos átomos de <b>${nombreEl(e)}</b> tiene una molécula de ${F(s)}?`,
+      tip:`En ${fhtml(s.c)}: ${s.c.map(([x,m])=>`${m} de ${x}`).join(", ")}. Sin subíndice = 1 átomo.`};
+  }
+  return {tag:"Fórmulas",typed:true,num:total(s.c),q:`¿Cuántos átomos hay <b>en total</b> en una molécula de ${F(s)}?`,
+    tip:`${s.c.map(([x,m])=>m).join(" + ")} = ${total(s.c)} átomos.`};
+}
+
+function genEscribe(){
+  const s = rnd(SUBST), correct = fhtml(s.c);
+  const w = sample(variantes(s.c),3);
+  return {tag:"Fórmulas",q:`Una molécula tiene ${describe(s.c)}. ¿Cuál es su fórmula?`,opts:[correct,...w],
+    tip:`El subíndice indica el número de átomos de cada tipo; si es 1, no se escribe. Correcta: ${correct}.`};
+}
+
+function genMasa(){
+  const s = rnd(SUBST.filter(x=>x.mass)), M = masaDe(s.c);
+  const datos = s.c.map(([e])=>`M(${e}) = ${fmtNum(MASA[e])}`).join("; ");
+  const calc = s.c.map(([e,n])=> n>1 ? `${n} · ${fmtNum(MASA[e])}` : fmtNum(MASA[e])).join(" + ");
+  const tip = `M(${fhtml(s.c)}) = ${calc} = ${fmtNum(M)} u`;
+  const q = `Calcula la <b>masa molecular</b> de ${F(s)} (${s.n}).<br><span class="muted">Datos: ${datos}</span>`;
+  if(Math.random()<0.5) return {tag:"Masa molecular",typed:true,num:M,q:q+"<br><span class=\"muted\">Responde solo con el número (en u).</span>",tip};
+  const noSub = s.c.reduce((t,[e])=>t+MASA[e],0);
+  const cand = new Set();
+  if(noSub!==M) cand.add(noSub);
+  cand.add(M+MASA[s.c[0][0]]);
+  if(M-MASA[s.c[s.c.length-1][0]]>0) cand.add(M-MASA[s.c[s.c.length-1][0]]);
+  let d=1; while(cand.size<6){ cand.add(M+d); if(M-d>0) cand.add(M-d); d++; }
+  cand.delete(M);
+  const w = sample([...cand],3).map(x=>fmtNum(x)+" u");
+  return {tag:"Masa molecular",q,opts:[fmtNum(M)+" u",...w],tip};
+}
+
+function genEnlace(){
+  const k = Math.floor(Math.random()*4);
+  if(k===0){
+    const s = rnd(SUBST), els=[...new Set(s.c.map(([e])=>e))];
+    const why = els.length===1 ? `${els[0]} es un ${tipoEl(els[0])}: dos no metales → covalente.` :
+      els.map(e=>`${e} es ${tipoEl(e)==="metal"?"un metal":"un no metal"}`).join(" y ") + ` → ${s.bond}.`;
+    return {tag:"Enlace químico",q:`¿Qué tipo de enlace hay en ${F(s)} (${s.n})?`,opts:["Enlace iónico","Enlace covalente"],
+      correct:s.bond==="iónico"?"Enlace iónico":"Enlace covalente",tip:why};
+  }
+  if(k===1){
+    const s = rnd(IONICOS), w = sample(COVALENTES,3);
+    return {tag:"Enlace químico",q:"¿Cuál de estas sustancias tiene <b>enlace iónico</b>?",opts:[F(s),...w.map(F)],
+      tip:`${fhtml(s.c)} une un metal con un no metal.`};
+  }
+  if(k===2){
+    const s = rnd(COVALENTES), w = sample(IONICOS,3);
+    return {tag:"Enlace químico",q:"¿Cuál de estas sustancias tiene <b>enlace covalente</b>?",opts:[F(s),...w.map(F)],
+      tip:`${fhtml(s.c)} solo tiene no metales.`};
+  }
+  const e = rnd([...METALES,...NOMETALES]), m = esMetal(e);
+  return {tag:"Metal o no metal",q:`El elemento <b>${nombreEl(e)}</b> (${e}), ¿es un metal o un no metal?`,opts:["Metal","No metal"],
+    correct:m?"Metal":"No metal",tip:`${e} es ${m?"un metal":"un no metal"}. Metales: Na, K, Mg, Ca, Fe, Al, Cu. No metales: H, C, N, O, S, Cl, Br.`};
+}
+
+/* ===================== PREGUNTAS ESTÁTICAS ===================== */
+const DEFS = [
+  Q("Definiciones","¿Qué es una <b>molécula</b>?","Un agrupamiento de átomos, iguales o diferentes, que se combinan entre sí",["Una partícula con carga positiva del núcleo","Un solo átomo aislado","La unidad de masa atómica"]),
+  Q("Definiciones","Una <b>sustancia simple</b> es la formada por moléculas con...","Un solo tipo de átomos",["Átomos de dos tipos distintos","Un solo átomo siempre","Solo átomos de hidrógeno"],"Ejemplo: el oxígeno, O₂."),
+  Q("Definiciones","Un <b>compuesto</b> es una sustancia formada por moléculas con...","Átomos distintos",["Un solo tipo de átomos","Solo electrones","Átomos de metales únicamente"],"Ejemplo: el agua, H₂O."),
+  Q("Definiciones","¿Qué es una <b>fórmula química</b>?","La forma de representar una molécula con los símbolos de sus átomos y subíndices",["El nombre completo de la sustancia","La masa de la molécula","El número de electrones del átomo"]),
+  Q("Definiciones","En una fórmula, los <b>subíndices</b> indican...","El número de átomos de cada tipo",["La masa de cada átomo","El tipo de enlace","El número de moléculas"]),
+  Q("Definiciones","Si un símbolo de la fórmula <b>no lleva subíndice</b>, significa que hay...","1 átomo de ese elemento",["0 átomos","2 átomos","Ninguno: se ignora"],"En H₂O, el oxígeno tiene 1 átomo."),
+  Q("Definiciones","En la fórmula H₂O, el subíndice 2 afecta al...","Hidrógeno",["Oxígeno","Agua entera","Enlace"],"El subíndice afecta al símbolo que tiene justo delante."),
+  Q("Definiciones","¿Qué diferencia a una sustancia simple de un compuesto?","El número de tipos de átomos distintos que tiene",["El número total de átomos","Que uno es sólido y otro líquido","Que uno tiene masa y otro no"]),
+  Q("Masa molecular","¿Qué es la <b>masa molecular</b>?","La masa de una molécula expresada en unidades de masa atómica (u)",["El número de átomos de la molécula","La carga de la molécula","El número de enlaces"]),
+  Q("Masa molecular","¿Cómo se calcula la masa molecular?","Sumando las masas de los átomos que forman la molécula",["Multiplicando todas las masas entre sí","Restando las masas de los átomos","Contando solo los átomos distintos"]),
+  Q("Masa molecular","¿En qué unidad se expresa la masa molecular?","En unidades de masa atómica (u)",["En kilogramos (kg)","En litros (L)","En metros (m)"]),
+  Q("Masa molecular","La masa molecular del cloruro de sodio (NaCl) es...","58,5 u",["35,5 u","23 u","12 u"],"M(NaCl) = 35,5 + 23 = 58,5 u."),
+  Q("Masa molecular","Para calcular la masa molecular, el subíndice de cada átomo...","Se multiplica por la masa de ese átomo",["Se ignora","Se resta de la masa","Se divide entre la masa"]),
+  Q("Enlace químico","El enlace <b>iónico</b> se da entre...","Un metal y un no metal",["Dos no metales","Dos metales siempre","Un átomo y un electrón"]),
+  Q("Enlace químico","El enlace <b>covalente</b> se da entre...","No metales",["Un metal y un no metal","Solo metales","Solo gases nobles"]),
+  Q("Enlace químico","En el enlace covalente, los átomos...","Comparten electrones",["Ceden todos los electrones","Pierden su núcleo","No usan electrones"]),
+  Q("Enlace químico","En el enlace iónico, un átomo cede electrones y el otro los capta, formando...","Iones con cargas opuestas que se atraen",["Moléculas neutras sin carga","Nuevos neutrones","Átomos sin electrones"]),
+  VF("Una sustancia simple puede tener más de un átomo en su molécula.",true,"Ejemplo: O₂ tiene 2 átomos, pero los dos son de oxígeno."),
+  VF("El ozono (O₃) es un compuesto.",false,"Todos sus átomos son de oxígeno: es una sustancia simple."),
+  VF("El agua es una sustancia simple.",false,"Tiene átomos de dos tipos (H y O): es un compuesto."),
+  VF("La masa molecular se expresa en kilogramos.",false,"Se expresa en unidades de masa atómica (u)."),
+  VF("Entre dos no metales se forma un enlace iónico.",false,"Entre no metales el enlace es covalente."),
+  VF("El NaCl tiene enlace iónico.",true,"Na es un metal y Cl es un no metal."),
+  VF("El CO₂ es un compuesto con enlace covalente.",true,"C y O son no metales."),
+  VF("Cambiar el subíndice de una fórmula no cambia la sustancia.",false,"H₂O y H₂O₂ son sustancias distintas.")
+];
+
+/* ===================== MODOS ===================== */
+const DEF_ONLY  = DEFS.filter(q=>q.tag==="Definiciones" || (q.tag==="Verdadero o falso" && /simple|agua|subíndice|ozono/i.test(q.q)));
+const MASA_STAT = DEFS.filter(q=>q.tag==="Masa molecular" || /masa molecular/i.test(q.q));
+const ENL_STAT  = DEFS.filter(q=>q.tag==="Enlace químico" || /enlace/i.test(q.q));
+
+const MODES = {
+  defs:     {icon:"📖", name:"Definiciones", desc:"Molécula, sustancia simple, compuesto y fórmula", items:[...DEF_ONLY]},
+  simples:  {icon:"⚗️", name:"Simple o compuesto", desc:"Clasifica sustancias por su fórmula", items:[...rep(genClasifica,10),...DEF_ONLY.slice(0,4)]},
+  formulas: {icon:"🔤", name:"Fórmulas químicas", desc:"Leer fórmulas, contar átomos y escribirlas", items:[...rep(genCuenta,6),...rep(genEscribe,6),...DEFS.slice(3,7)]},
+  masa:     {icon:"⚖️", name:"Masa molecular", desc:"Calcula masas en u, ¡con y sin calculadora mental!", items:[...rep(genMasa,10),...MASA_STAT]},
+  enlace:   {icon:"🔗", name:"Enlace químico", desc:"Iónico (metal + no metal) y covalente (no metales)", items:[...rep(genEnlace,10),...ENL_STAT]},
+  mix:      {icon:"🎯", name:"Modo examen (mixto)", desc:"Todo lo que entra en el examen", items:[]}
+};
+MODES.mix.items = [...DEFS, ...rep(genClasifica,5), ...rep(genCuenta,3), ...rep(genEscribe,3), ...rep(genMasa,6), ...rep(genEnlace,6)];
+
+/* ===================== JUEGO ===================== */
+function draw(){
+  if(!G.pool.length) G.pool = shuffle(MODES[G.mode].items.slice());
+  const it = G.pool.pop();
+  return typeof it === "function" ? it() : it;
+}
+
+function showMenu(){
+  app.innerHTML = `
+    <h1>🧪 Quimi Quest</h1>
+    <p class="sub">Moléculas y enlace químico · Récord: <b>${getRecord()}</b></p>
+    ${Object.entries(MODES).map(([k,m])=>`<button class="mode" data-m="${k}"><b>${m.icon} ${m.name}</b><span>${m.desc}</span></button>`).join("")}
+    <p class="muted">${TOTAL_Q} preguntas · ${LIVES} vidas · las rachas dan puntos extra</p>`;
+  app.querySelectorAll("button.mode").forEach(b=>b.onclick=()=>startGame(b.dataset.m));
+}
+
+function startGame(mode){
+  G = {mode, lives:LIVES, score:0, streak:0, n:0, errors:[], pool:[]};
+  nextQuestion();
+}
+
+function hud(){
+  return `<div class="hud">
+    <span>Pregunta <b>${G.n}/${TOTAL_Q}</b></span>
+    <span>Puntos <b>${G.score}</b></span>
+    <span>Racha <b>${G.streak}</b></span>
+    <span class="hearts">${"❤️".repeat(G.lives)}${"🖤".repeat(LIVES-G.lives)}</span></div>`;
+}
+
+function nextQuestion(){
+  if(G.n>=TOTAL_Q || G.lives<=0) return endGame();
+  G.n++;
+  const q = draw();
+  if(q.typed) renderTyped(q); else renderChoice(q);
+}
+
+function renderChoice(q){
+  const correct = q.correct ?? q.opts[0];
+  const opts = q.fixed ? q.opts.slice() : shuffle(q.opts.slice());
+  app.innerHTML = hud()+`<div class="card"><p class="tag">${q.tag}</p><h2>${q.q}</h2><div id="opts"></div></div><div id="fb"></div>`;
+  const box = document.getElementById("opts");
+  const btns = [];
+  opts.forEach(o=>{
+    const b = document.createElement("button"); b.innerHTML = o; btns.push([b,o]);
+    b.onclick = ()=>{
+      btns.forEach(([x,v])=>{ x.disabled=true; if(v===correct) x.classList.add("correct"); });
+      const ok = o===correct; if(!ok) b.classList.add("wrong");
+      feedback(ok, correct, q);
+    };
+    box.appendChild(b);
+  });
+}
+
+function renderTyped(q){
+  app.innerHTML = hud()+`<div class="card"><p class="tag">${q.tag}</p><h2>${q.q}</h2>
+    <input type="text" id="inp" inputmode="decimal" placeholder="Escribe tu respuesta…" autocomplete="off" spellcheck="false">
+    <button class="primary" id="chk">Comprobar</button></div><div id="fb"></div>`;
+  const inp = document.getElementById("inp"), chk = document.getElementById("chk");
+  inp.focus();
+  const check = ()=>{
+    if(!inp.value.trim()) return;
+    inp.disabled = true; chk.style.display="none";
+    const v = parseFloat(inp.value.replace(/u/gi,"").replace(",",".").trim());
+    feedback(!isNaN(v) && Math.abs(v-q.num)<0.01, fmtNum(q.num)+(q.tag==="Masa molecular"?" u":""), q);
+  };
+  chk.onclick = check;
+  inp.addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); check(); } });
+}
+
+function feedback(ok, correct, q){
+  if(ok){ G.streak++; G.score += 10 + Math.min(G.streak-1,5)*2; }
+  else { G.streak = 0; G.lives--; G.errors.push({q:q.q, correct, tip:q.tip||""}); }
+  const last = G.n>=TOTAL_Q || G.lives<=0;
+  document.getElementById("fb").innerHTML = `<div class="fb ${ok?"ok":"bad"}">
+      <p><b>${ok?"✅ ¡Correcto!":"❌ Incorrecto"}</b></p>
+      ${ok?"":`<p>Respuesta correcta: <b>${correct}</b></p>`}
+      ${q.tip?`<div class="tip">💡 ${q.tip}</div>`:""}
+    </div><button class="primary" id="next">${last?"Ver resultados":"Siguiente →"}</button>`;
+  const next = document.getElementById("next");
+  next.onclick = nextQuestion; next.focus();
+  app.querySelector(".hud").outerHTML = hud();
+}
+
+function endGame(){
+  const rec = getRecord(), isRecord = G.score > rec;
+  if(isRecord) setRecord(G.score);
+  const rango = G.score>=200 ? "🏆 ¡Listo para el examen!" : G.score>=120 ? "🥈 ¡Muy bien, repasa los fallos!" : "💪 ¡Sigue practicando!";
+  const review = G.errors.length
+    ? `<ul class="review">${G.errors.map(e=>`<li><b>${e.q}</b><br>Respuesta: ${e.correct}${e.tip?`<br><span class="muted">${e.tip}</span>`:""}</li>`).join("")}</ul>`
+    : `<p>🏆 ¡Partida perfecta, sin errores!</p>`;
+  app.innerHTML = `
+    <h1>${G.lives<=0?"💔 Te quedaste sin vidas":"🎉 ¡Partida completada!"}</h1>
+    <div class="card"><div class="muted">Tu puntuación</div><div class="big">${G.score}</div>
+      <p class="muted">${rango}</p>
+      <p class="muted">${isRecord?"🥇 ¡Nuevo récord!":"Récord: <b>"+rec+"</b>"}</p></div>
+    <div class="card"><p class="tag">Para repasar</p>${review}</div>
+    <button class="primary" id="again">Jugar otra vez</button>
+    <button id="menu" style="text-align:center">Volver al menú</button>`;
+  document.getElementById("again").onclick = ()=>startGame(G.mode);
+  document.getElementById("menu").onclick = showMenu;
+}
+
+showMenu();
+</script>
+</body>
+</html>
